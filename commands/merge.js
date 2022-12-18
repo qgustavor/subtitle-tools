@@ -11,6 +11,19 @@ exports.builder = {
     demandOption: true,
     type: 'string',
     normalize: true
+  },
+  allowKeyOverride: {
+    describe: 'allow overriding info values',
+    type: 'boolean'
+  },
+  allowNewParts: {
+    describe: 'allow adding parts (like Aegisub Extradata) when merging',
+    type: 'boolean'
+  },
+  sortEvents: {
+    describe: 'sort events after merging',
+    type: 'boolean',
+    default: true
   }
 }
 
@@ -20,62 +33,61 @@ exports.handler = (argv) => runCommand(argv).catch(err => {
 })
 
 async function runCommand (argv) {
-  const files = argv.files
-  const output = argv.output
+  const { files, output, allowKeyOverride, allowNewParts, sortEvents } = argv
 
   let result
-  for (let file of files) {
-    const data = await readFile(file)
+  for (const file of files) {
+    const data = await fs.promises.readFile(file)
     const parsedData = assParser(data, { comments: true })
-    if (result) {
-      parsedData.forEach(part => {
-        const target = result.find(e => part.section === e.section)
-        if (target) {
-          part.body.forEach(bodyPart => {
-            const existingKey =
-              // merge all dialogue lines
-              part.section === 'Events' ? null
-              // don't duplicate comments
-              : part.section === 'Script Info' && bodyPart.type === 'comment'
-              ? target.body.find(e => e.type === 'comment' && bodyPart.value === e.value)
-              // merge styles, styles with same name are overwritten
-              : part.section.endsWith('Styles') && bodyPart.key === 'Style'
-              ? target.body.find(e => e.key === 'Style' && bodyPart.value.Name === e.value.Name)
-              // merge other data
-              : target.body.find(e => bodyPart.key === e.key)
 
-            if (existingKey) {
-              existingKey.value = bodyPart.value
-            } else {
-              target.body.push(bodyPart)
-            }
-          })
-        } else {
-          result.push(e)
-        }
-      })
-    } else {
+    if (!result) {
       result = parsedData
+      continue
+    }
+
+    // TODO match subtitle resolutions
+    for (const part of parsedData) {
+      const target = result.find(e => part.section === e.section)
+      if (target) {
+        part.body.forEach(bodyPart => {
+          const existingKey =
+            // merge all dialogue lines
+            part.section === 'Events' ? null
+            // don't duplicate comments
+            : part.section === 'Script Info' && bodyPart.type === 'comment'
+            ? target.body.find(e => e.type === 'comment' && bodyPart.value === e.value)
+            // merge styles, styles with same name are overwritten
+            : part.section.endsWith('Styles') && bodyPart.key === 'Style'
+            ? target.body.find(e => e.key === 'Style' && bodyPart.value.Name === e.value.Name)
+            // merge other data
+            : target.body.find(e => bodyPart.key === e.key)
+
+          if (existingKey) {
+            if (allowKeyOverride) {
+              existingKey.value = bodyPart.value
+            }
+          } else if (bodyPart.key !== 'Format') {
+            target.body.push(bodyPart)
+          }
+        })
+      } else if (allowNewParts) {
+        result.push(part)
+      }
     }
   }
 
-  await writeFile(output, assStringify(result))
-}
-
-function readFile (path) {
-  return new Promise((resolve, reject) => {
-    fs.readFile(path, 'utf-8', (err, data) => {
-      if (err) return reject(err)
-      resolve(data)
+  if (sortEvents) {
+    result.find(e => e.section === 'Events').body.sort((a, b) => {
+      if (a.key === 'Format') return -1
+      if (b.key === 'Format') return 1
+      return a.value.Start.localeCompare(b.value.Start)
     })
-  })
-}
+  }
 
-function writeFile (path, data) {
-  return new Promise((resolve, reject) => {
-    fs.writeFile(path, data, 'utf-8', (err) => {
-      if (err) return reject(err)
-      resolve()
-    })
-  })
+  await fs.promises.writeFile(output,
+    assStringify(result)
+    .replaceAll(/(Format: )(.*)/g, (all, prefix, suffix) => prefix + suffix.replaceAll(' ', ''))
+    .replaceAll('\r', '')
+    .replaceAll('\n', '\r\n')
+  )
 }
