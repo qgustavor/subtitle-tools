@@ -1,10 +1,11 @@
-const assParser = require('ass-parser')
-const assStringify = require('ass-stringify')
-const fs = require('fs')
+import parse, { detectStringifyOptions } from '@qgustavor/ass-parser'
+import stringify from '@qgustavor/ass-stringify'
+import { mergeSubtitles } from '../lib/utils.js'
+import fs from 'fs'
 
-exports.command = 'merge <files..>'
-exports.describe = 'Merge ASS subtitle files'
-exports.builder = {
+export const command = 'merge <files..>'
+export const describe = 'Merge ASS subtitle files'
+export const builder = {
   output: {
     alias: 'o',
     describe: 'output file path',
@@ -20,74 +21,68 @@ exports.builder = {
     describe: 'allow adding parts (like Aegisub Extradata) when merging',
     type: 'boolean'
   },
+  mergeMetadata: {
+    describe: 'allow merging metadata (like Script Info and Aegisub Extradata)',
+    type: 'boolean'
+  },
   sortEvents: {
     describe: 'sort events after merging',
     type: 'boolean',
     default: true
+  },
+  resolutionX: {
+    describe: 'horizontal subtitle resolution',
+    type: 'number'
+  },
+  resolutionY: {
+    describe: 'vertical subtitle resolution',
+    type: 'number'
+  },
+  arMode: {
+    describe: 'aspect ratio handling mode',
+    choices: ['RemoveBorder', 'AddBorder', 'Stretch']
+  },
+  lineCollisionMode: {
+    describe: 'line collision handling mode',
+    choices: ['Overlap', 'KeepFirst', 'ChangeAlignment', 'ChangeStyle'],
+    default: 'Overlap'
+  },
+  styleCollisionMode: {
+    describe: 'style collision handling mode',
+    choices: ['Rename', 'KeepFirst', 'KeepLast'],
+    default: 'Rename'
+  },
+  minCollisonOverlap: {
+    describe: 'minimal overlap time in seconds to be considered a collision',
+    type: 'number',
+    default: 0.1
+  },
+  layerHandling: {
+    describe: 'how layers are handled during collisions',
+    choices: ['Unchanged', 'FirstAbove', 'LastAbove'],
+    default: 'Unchanged'
   }
 }
 
-exports.handler = (argv) => runCommand(argv).catch(err => {
+export const handler = (argv) => runCommand(argv).catch(err => {
   console.error(err.stack)
   process.exit(1)
 })
 
 async function runCommand (argv) {
-  const { files, output, allowKeyOverride, allowNewParts, sortEvents } = argv
+  const subtitles = []
+  let stringifyOptions
 
-  let result
-  for (const file of files) {
-    const data = await fs.promises.readFile(file)
-    const parsedData = assParser(data, { comments: true })
+  for (const file of argv.files) {
+    const data = await fs.promises.readFile(file, 'utf-8')
+    const parsedData = parse(data, { comments: true, parseTimestamps: true })
+    subtitles.push(parsedData)
 
-    if (!result) {
-      result = parsedData
-      continue
-    }
-
-    // TODO match subtitle resolutions
-    for (const part of parsedData) {
-      const target = result.find(e => part.section === e.section)
-      if (target) {
-        part.body.forEach(bodyPart => {
-          const existingKey =
-            // merge all dialogue lines
-            part.section === 'Events' ? null
-            // don't duplicate comments
-            : part.section === 'Script Info' && bodyPart.type === 'comment'
-            ? target.body.find(e => e.type === 'comment' && bodyPart.value === e.value)
-            // merge styles, styles with same name are overwritten
-            : part.section.endsWith('Styles') && bodyPart.key === 'Style'
-            ? target.body.find(e => e.key === 'Style' && bodyPart.value.Name === e.value.Name)
-            // merge other data
-            : target.body.find(e => bodyPart.key === e.key)
-
-          if (existingKey) {
-            if (allowKeyOverride) {
-              existingKey.value = bodyPart.value
-            }
-          } else if (bodyPart.key !== 'Format') {
-            target.body.push(bodyPart)
-          }
-        })
-      } else if (allowNewParts) {
-        result.push(part)
-      }
+    if (!stringifyOptions) {
+      stringifyOptions = detectStringifyOptions(data)
     }
   }
 
-  if (sortEvents) {
-    result.find(e => e.section === 'Events').body.sort((a, b) => {
-      if (a.key === 'Format') return -1
-      if (b.key === 'Format') return 1
-      return a.value.Start.localeCompare(b.value.Start)
-    })
-  }
-
-  await fs.promises.writeFile(output,
-    assStringify(result)
-    .replaceAll(/(Format: )(.*)/g, (all, prefix, suffix) => prefix + suffix.replaceAll(' ', ''))
-    .replaceAll('\r', '')
-    .replaceAll('\n', '\r\n')
-  )
+  const result = mergeSubtitles(subtitles, argv)
+  await fs.promises.writeFile(argv.output, stringify(result, stringifyOptions))
 }

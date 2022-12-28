@@ -1,10 +1,10 @@
-const assParser = require('ass-parser')
-const assStringify = require('ass-stringify')
-const fs = require('fs').promises
+import parse, { detectStringifyOptions } from '@qgustavor/ass-parser'
+import stringify from '@qgustavor/ass-stringify'
+import fs from 'fs'
 
-exports.command = 'shift-times <files..>'
-exports.describe = 'Shift times in ASS subtitle files'
-exports.builder = {
+export const command = 'shift-times <files..>'
+export const describe = 'Shift times in ASS subtitle files'
+export const builder = {
   time: {
     alias: 't',
     describe: 'time to be shifted',
@@ -13,35 +13,30 @@ exports.builder = {
   }
 }
 
-exports.handler = (argv) => runCommand(argv).catch(err => {
+export const handler = (argv) => runCommand(argv).catch(err => {
   console.error(err.stack)
   process.exit(1)
 })
 
 async function runCommand (argv) {
   const { files, time } = argv
+  console.warn('DEPRECATED COMMAND: it will be removed in future releases')
+  console.warn('Use ffmpeg instead:')
+  console.warn('  ffmpeg -itsoffset [offset] -i [source] [target]')
 
-  for (let file of files) {
-    const data = await fs.readFile(file, 'utf-8')
-    const parsedData = assParser(data, { comments: true })
+  for (const file of files) {
+    const data = await fs.promises.readFile(file, 'utf-8')
+    const parsedData = parse(data, { comments: true, parseTimestamps: true })
+    const stringifyOptions = detectStringifyOptions(data)
 
     const events = parsedData.find(e => e.section.endsWith('Events')).body
-    for (let { key, value } of events) {
-      if (key !== 'Dialogue') continue
-      value.Start = formatTimestamp(parseTimestamp(value.Start) + time)
-      value.End = formatTimestamp(parseTimestamp(value.End) + time)
+    for (const { key, value } of events) {
+      if (key !== 'Dialogue' || key !== 'Comment') continue
+      value.Start += time
+      value.End += time
     }
-    
+
     const output = file.replace(/\.ass/g, '.shift_' + time + '.ass')
-    await fs.writeFile(output, assStringify(parsedData))
+    await fs.promises.writeFile(output, stringify(parsedData, stringifyOptions))
   }
-}
-
-// Hacky one-liners ¯\_(ツ)_/¯
-function parseTimestamp (timestamp) {
-  return timestamp.split(':').reduce((sum, e) => sum * 60 + Number(e), 0)
-}
-
-function formatTimestamp (timestamp) {
-  return new Date(timestamp * 1000).toISOString().substr(12, 10)
 }

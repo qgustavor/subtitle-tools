@@ -1,12 +1,20 @@
-#!/usr/bin/env node
+import yargs from 'yargs'
+import { hideBin } from 'yargs/helpers'
 
-const pkg = require('./package.json')
+// commandDir is not supported with ESM yet, define commands one by one here:
+import * as shiftTimesModule from './commands/shift-times.js'
+import * as listFontsModule from './commands/list-fonts.js'
+import * as mergeModule from './commands/merge.js'
+
 process.title = 'Subtitle Tools'
 
-require('yargs')
-  .commandDir('commands')
+// eslint-disable-next-line no-unused-expressions
+yargs(hideBin(process.argv))
+  // Define each command here too
+  .command(shiftTimesModule)
+  .command(listFontsModule)
+  .command(mergeModule)
   .recommendCommands()
-  .demandCommand(1, 'You need at least one command before moving on')
+  .demandCommand(1)
   .help()
-  .epilogue('for more information check ' + pkg.homepage)
   .argv
