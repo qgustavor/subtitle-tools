@@ -24,7 +24,7 @@ async function runCommand (argv) {
       console.warn(`Missing styles in ${file}: ${missingStylesArr.join(', ')}`)
     }
 
-    usedFonts.add(...fonts)
+    for (const font of fonts) usedFonts.add(font)
   }
 
   console.log(Array.from(usedFonts).sort().join('\n'))
