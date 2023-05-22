@@ -1,6 +1,6 @@
 {
   "name": "subtitle-tools",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Edit ASS subtitles in command line",
   "type": "module",
   "bin": "index.js",
